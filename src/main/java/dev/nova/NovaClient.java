@@ -8,7 +8,7 @@ import dev.nova.render.EspRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import org.lwjgl.glfw.GLFW;
 
@@ -24,7 +24,7 @@ public class NovaClient implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
         // If this event name differs in your Fabric API build, try END_MAIN / BEFORE_DEBUG_RENDER.
-        WorldRenderEvents.BEFORE_TRANSLUCENT.register(ctx -> EspRenderer.render(ctx.matrices(), modules));
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(ctx -> EspRenderer.render(ctx.matrices(), modules));
         ClientLifecycleEvents.CLIENT_STOPPING.register(c -> Config.save(modules));
     }
 
