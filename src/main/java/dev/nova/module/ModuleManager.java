@@ -9,6 +9,7 @@ public class ModuleManager {
     public ModuleManager() {
         modules.add(new StorageFinder());
         modules.add(new SpawnerFinder());
+        modules.add(new Freecam());
     }
 
     public List<Module> all() { return modules; }

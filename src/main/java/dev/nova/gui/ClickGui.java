@@ -14,17 +14,22 @@ import java.awt.Color;
 import java.util.*;
 
 /**
- * Sidebar (modules) + settings pane. Input is polled from GLFW inside render(), so the screen does not
- * depend on the mouse/key event signatures that changed in 1.21.9+.
+ * Category sidebar + module list (name, description, switch). Left-click a row to toggle the module,
+ * right-click it (or click the arrow) to expand its settings.
+ * Input is polled from GLFW inside render(), so this doesn't depend on the mouse/key event signatures.
  */
 public class ClickGui extends Screen {
-    private static final int W = 540, H = 340, SIDE = 134;
+    private static final int SIDE = 112;
+    private int W = 420, H = 270;
 
-    private static final int BG = 0xF2101114, CARD = 0xFF17181D, ROW = 0xFF1D1F26, ROW_HOVER = 0xFF23252E;
-    private static final int ACCENT = 0xFF8B6CFF, ACCENT2 = 0xFF4FC3F7;
-    private static final int TEXT = 0xFFE8E8EE, DIM = 0xFF8A8D99, OFF = 0xFF353742, TRACK = 0xFF2A2C35;
+    // palette (dark warm + orange accent)
+    private static final int BG = 0xFF0E0D0C, SIDEBG = 0xFF12100E;
+    private static final int MROW = 0xFF1A1816, MROW_HOVER = 0xFF211E1B, MROW_ON = 0xFF1E1A15;
+    private static final int ROW = 0xFF151311, ROW_HOVER = 0xFF1D1A17;
+    private static final int ACCENT = 0xFFF0892B, ACCENT2 = 0xFFFFB454;
+    private static final int TEXT = 0xFFECE8E2, DIM = 0xFF8C857B, OFF = 0xFF3A3631, TRACK = 0xFF2B2824;
 
-    private enum Kind { MODULE_SELECT, MODULE_TOGGLE, BOOL, SLIDER, MODE, COLOR_TOGGLE, COLOR_SB, COLOR_HUE }
+    private enum Kind { CAT, SAVE, MODULE_TOGGLE, MODULE_EXPAND, BOOL, SLIDER, MODE, COLOR_TOGGLE, COLOR_SB, COLOR_HUE }
     private static final class Hit {
         int x, y, w, h, idx; Kind kind; Object ref;
         Hit(Kind k, int x, int y, int w, int h, Object ref) { kind = k; this.x = x; this.y = y; this.w = w; this.h = h; this.ref = ref; }
@@ -33,9 +38,10 @@ public class ClickGui extends Screen {
     private final List<Hit> hits = new ArrayList<>();
     private final Map<Object, Float> anims = new HashMap<>();
     private final Set<ColorSetting> expanded = new HashSet<>();
-    private Module selected = NovaClient.modules.all().get(0);
+    private final Set<Module> openModules = new HashSet<>();
+    private Module.Category cat = Module.Category.RENDER;
     private Hit drag;
-    private boolean prevLeft;
+    private boolean prevLeft, prevRight;
     private float dt;
     private long lastNs = System.nanoTime();
     private int scroll, contentH, areaTop, areaBot;
@@ -59,19 +65,27 @@ public class ClickGui extends Screen {
         return c;
     }
 
+    private String ellipsize(String s, int max) {
+        if (textRenderer.getWidth(s) <= max) return s;
+        String t = s;
+        while (t.length() > 1 && textRenderer.getWidth(t + "...") > max) t = t.substring(0, t.length() - 1);
+        return t + "...";
+    }
+
     // ------------------------------------------------------------------ render
     @Override
     public void render(DrawContext ctx, int mx, int my, float delta) {
         super.render(ctx, mx, my, delta);
+        W = Math.min(420, width - 16);
+        H = Math.min(270, height - 16);
         long now = System.nanoTime();
         dt = Math.min(0.1f, (now - lastNs) / 1e9f);
         lastNs = now;
         hits.clear();
 
         int x0 = (width - W) / 2, y0 = (height - H) / 2;
-        Gfx.round(ctx, x0 - 3, y0 - 3, W + 6, H + 6, 13, 0x30000000);
-        Gfx.round(ctx, x0, y0, W, H, 10, BG);
-        Gfx.hgrad(ctx, x0 + 14, y0, W - 28, 2, ACCENT, ACCENT2);
+        Gfx.round(ctx, x0 - 1, y0 - 1, W + 2, H + 2, 9, 0xFF2A2622);
+        Gfx.round(ctx, x0, y0, W, H, 8, BG);
 
         drawSidebar(ctx, x0, y0, mx, my);
         drawContent(ctx, x0, y0, mx, my);
@@ -87,53 +101,59 @@ public class ClickGui extends Screen {
     }
 
     private void drawSidebar(DrawContext ctx, int x0, int y0, int mx, int my) {
-        int sx = x0 + 8, sy = y0 + 10, sw = SIDE, sh = H - 20;
-        Gfx.round(ctx, sx, sy, sw, sh, 8, CARD);
-        ctx.drawText(textRenderer, Text.literal("NOVA").formatted(Formatting.BOLD), sx + 12, sy + 12, ACCENT, true);
-        ctx.drawText(textRenderer, "client", sx + 46, sy + 12, DIM, false);
-        ctx.drawText(textRenderer, "RENDER", sx + 12, sy + 34, DIM, false);
+        Gfx.round(ctx, x0, y0, SIDE, H, 8, SIDEBG);
+        ctx.fill(x0 + SIDE - 9, y0, x0 + SIDE, y0 + H, SIDEBG);   // square off the right edge
+        ctx.fill(x0 + SIDE, y0, x0 + SIDE + 1, y0 + H, 0xFF221F1B);
 
-        int ry = sy + 48;
-        for (Module m : NovaClient.modules.all()) {
-            int rx = sx + 6, rw = sw - 12, rh = 24;
+        // title
+        ctx.fill(x0 + 11, y0 + 13, x0 + 13, y0 + 33, ACCENT);
+        Text title = Text.literal("NOVA").formatted(Formatting.BOLD);
+        ctx.drawText(textRenderer, title, x0 + 19, y0 + 13, TEXT, true);
+        ctx.drawText(textRenderer, "b1.0", x0 + 19 + textRenderer.getWidth(title) + 4, y0 + 13, DIM, false);
+        ctx.drawText(textRenderer, "client", x0 + 19, y0 + 24, 0xFF6F695F, false);
+
+        int ry = y0 + 46;
+        for (Module.Category c : Module.Category.values()) {
+            int rx = x0 + 7, rw = SIDE - 14, rh = 22;
             boolean hover = Gfx.in(mx, my, rx, ry, rw, rh);
-            float hv = anim(m.name() + "_h", hover ? 1f : 0f);
-            float sel = anim(m.name() + "_s", selected == m ? 1f : 0f);
-            Gfx.round(ctx, rx, ry, rw, rh, 6, Gfx.lerp(CARD, ROW_HOVER, hv));
-            if (sel > 0.01f) {
-                Gfx.round(ctx, rx, ry, rw, rh, 6, Gfx.alpha(ACCENT, 0.20f * sel));
-                Gfx.round(ctx, rx, ry + 5, 2, rh - 10, 1, Gfx.alpha(ACCENT, sel));
-            }
-            int tc = Gfx.lerp(DIM, TEXT, Math.max(sel, m.isEnabled() ? 0.8f : hv * 0.6f));
-            ctx.drawText(textRenderer, m.name(), rx + 10, ry + 8, tc, false);
-            int swx = rx + rw - 26, swy = ry + 7;
-            drawSwitch(ctx, m.name() + "_sw", m.isEnabled(), swx, swy, 20, 10);
-
-            hits.add(new Hit(Kind.MODULE_TOGGLE, swx - 2, swy - 3, 24, 16, m));
-            hits.add(new Hit(Kind.MODULE_SELECT, rx, ry, rw, rh, m));
-            ry += 28;
+            float hv = anim(c.name() + "_h", hover ? 1f : 0f);
+            float sel = anim(c.name() + "_s", cat == c ? 1f : 0f);
+            if (sel > 0.01f) Gfx.round(ctx, rx, ry, rw, rh, 6, Gfx.lerp(SIDEBG, 0xFFB5681F, sel));
+            Gfx.round(ctx, rx + 1, ry + 1, rw - 2, rh - 2, 5,
+                      Gfx.lerp(Gfx.lerp(SIDEBG, 0xFF1A1714, hv), 0xFF1E1A16, sel));
+            if (sel > 0.01f) Gfx.round(ctx, rx + 3, ry + 5, 2, rh - 10, 1, Gfx.alpha(ACCENT, sel));
+            Gfx.round(ctx, rx + 10, ry + 8, 6, 6, 3, Gfx.lerp(0xFF4A453E, ACCENT, sel));
+            ctx.drawText(textRenderer, c.label, rx + 23, ry + 7, Gfx.lerp(DIM, TEXT, Math.max(sel, hv * 0.7f)), false);
+            hits.add(new Hit(Kind.CAT, rx, ry, rw, rh, c));
+            ry += 25;
         }
-        ctx.drawText(textRenderer, "LAlt  toggle GUI", sx + 12, sy + sh - 16, 0xFF565967, false);
+
+        // save button
+        int bx = x0 + 7, by = y0 + H - 27, bw = SIDE - 14, bh = 20;
+        boolean bh2 = Gfx.in(mx, my, bx, by, bw, bh);
+        float bt = anim("save_h", bh2 ? 1f : 0f);
+        Gfx.round(ctx, bx, by, bw, bh, 5, Gfx.lerp(0xFF1E1B18, 0xFF2A251F, bt));
+        String lbl = "SAVE CONFIG";
+        ctx.drawText(textRenderer, lbl, bx + (bw - textRenderer.getWidth(lbl)) / 2, by + 6, Gfx.lerp(DIM, TEXT, bt), false);
+        hits.add(new Hit(Kind.SAVE, bx, by, bw, bh, null));
     }
 
     private void drawContent(DrawContext ctx, int x0, int y0, int mx, int my) {
-        Module m = selected;
-        int cx = x0 + SIDE + 24, cw = W - SIDE - 34;
+        int cx = x0 + SIDE + 12, cw = W - SIDE - 24;
+        areaTop = y0 + 10;
+        areaBot = y0 + H - 10;
 
-        ctx.drawText(textRenderer, Text.literal(m.name()).formatted(Formatting.BOLD), cx, y0 + 18, TEXT, true);
-        ctx.drawText(textRenderer, m.description(), cx, y0 + 32, DIM, false);
-        int hx = cx + cw - 34, hy = y0 + 20;
-        drawSwitch(ctx, m.name() + "_hsw", m.isEnabled(), hx, hy, 30, 16);
-        hits.add(new Hit(Kind.MODULE_TOGGLE, hx - 2, hy - 2, 34, 20, m));
-        ctx.fill(cx, y0 + 50, cx + cw, y0 + 51, 0xFF23252E);
-
-        areaTop = y0 + 58;
-        areaBot = y0 + H - 12;
-        ctx.enableScissor(cx - 4, areaTop, cx + cw + 4, areaBot);
+        ctx.enableScissor(cx - 2, areaTop, cx + cw + 2, areaBot);
         int y = areaTop - scroll;
-        for (Setting<?> s : m.settings()) {
-            if (!s.isVisible()) continue;
-            y = drawSetting(ctx, s, cx, y, cw, mx, my) + 6;
+        boolean any = false;
+        for (Module m : NovaClient.modules.all()) {
+            if (m.category() != cat) continue;
+            any = true;
+            y = drawModule(ctx, m, cx, y, cw, mx, my) + 6;
+        }
+        if (!any) {
+            String s = "No " + cat.label + " modules yet";
+            ctx.drawText(textRenderer, s, cx + (cw - textRenderer.getWidth(s)) / 2, y0 + H / 2 - 4, 0xFF5F5A52, false);
         }
         contentH = y + scroll - areaTop;
         ctx.disableScissor();
@@ -144,8 +164,42 @@ public class ClickGui extends Screen {
             int th = areaBot - areaTop;
             int bh = Math.max(20, th * th / contentH);
             int by = areaTop + (int) ((th - bh) * (scroll / (float) max));
-            Gfx.round(ctx, cx + cw + 6, by, 3, bh, 1, Gfx.alpha(ACCENT, 0.7f));
+            Gfx.round(ctx, cx + cw + 5, by, 3, bh, 1, Gfx.alpha(ACCENT, 0.7f));
         }
+    }
+
+    private int drawModule(DrawContext ctx, Module m, int cx, int y, int cw, int mx, int my) {
+        int h = 34;
+        boolean on = m.isEnabled();
+        boolean hover = Gfx.in(mx, my, cx, y, cw, h) && my >= areaTop && my < areaBot;
+        float t = anim(m.name() + "_on", on ? 1f : 0f);
+        float hv = anim(m.name() + "_h", hover ? 1f : 0f);
+
+        Gfx.round(ctx, cx, y, cw, h, 6, Gfx.lerp(0xFF25221E, 0xFFB5681F, t));
+        Gfx.round(ctx, cx + 1, y + 1, cw - 2, h - 2, 5, Gfx.lerp(Gfx.lerp(MROW, MROW_HOVER, hv), MROW_ON, t));
+        if (t > 0.01f) Gfx.round(ctx, cx + 3, y + 8, 2, h - 16, 1, Gfx.alpha(ACCENT, t));
+
+        ctx.drawText(textRenderer, m.name(), cx + 13, y + 8, Gfx.lerp(0xFF9A938A, TEXT, t), false);
+        ctx.drawText(textRenderer, ellipsize(m.description(), cw - 13 - 76), cx + 13, y + 20,
+                     Gfx.lerp(0xFF5F5A52, 0xFF857E74, t), false);
+
+        drawSwitch(ctx, m.name() + "_sw", on, cx + cw - 40, y + 10, 30, 14);
+
+        boolean open = openModules.contains(m);
+        ctx.drawText(textRenderer, open ? "v" : ">", cx + cw - 55, y + 13, DIM, false);
+        hits.add(new Hit(Kind.MODULE_EXPAND, cx + cw - 62, y, 20, h, m));
+        hits.add(new Hit(Kind.MODULE_TOGGLE, cx, y, cw, h, m));
+
+        y += h;
+        if (!open) return y;
+
+        int ny = y + 5, nx = cx + 10, nw = cw - 10, startY = ny;
+        for (Setting<?> s : m.settings()) {
+            if (!s.isVisible()) continue;
+            ny = drawSetting(ctx, s, nx, ny, nw, mx, my) + 4;
+        }
+        ctx.fill(cx + 4, startY, cx + 5, ny - 4, Gfx.alpha(ACCENT, 0.35f));
+        return ny - 4;
     }
 
     private int drawSetting(DrawContext ctx, Setting<?> s, int x, int y, int w, int mx, int my) {
@@ -170,8 +224,7 @@ public class ClickGui extends Screen {
             int fw = Math.max(4, (int) (tw * f));
             Gfx.hgrad(ctx, tx, ty, fw, 4, ACCENT, Gfx.lerp(ACCENT, ACCENT2, f));
             Gfx.round(ctx, tx + fw - 4, ty - 2, 8, 8, 4, 0xFFFFFFFF);
-            Hit hit = new Hit(Kind.SLIDER, tx, y + 16, tw, 18, n);
-            hits.add(hit);
+            hits.add(new Hit(Kind.SLIDER, tx, y + 16, tw, 18, n));
             return y + h;
         }
         if (s instanceof ModeSetting ms) {
@@ -186,7 +239,7 @@ public class ClickGui extends Screen {
                 boolean hv = Gfx.in(mx, my, cx, chy, cw, 15) && my >= areaTop && my < areaBot;
                 float t = anim(ms.name + label, on ? 1f : 0f);
                 Gfx.round(ctx, cx, chy, cw, 15, 7, Gfx.lerp(Gfx.lerp(TRACK, ROW_HOVER, hv ? 1f : 0f), ACCENT, t));
-                ctx.drawText(textRenderer, label, cx + 7, chy + 4, Gfx.lerp(DIM, 0xFFFFFFFF, Math.max(t, hv ? 0.6f : 0f)), false);
+                ctx.drawText(textRenderer, label, cx + 7, chy + 4, Gfx.lerp(DIM, 0xFF1A0F05, Math.max(t, 0f)) , false);
                 Hit hit = new Hit(Kind.MODE, cx, chy, cw, 15, ms);
                 hit.idx = i;
                 hits.add(hit);
@@ -197,7 +250,6 @@ public class ClickGui extends Screen {
         if (s instanceof ColorSetting c) {
             boolean open = expanded.contains(c);
             float t = anim(c.name + "_open", open ? 1f : 0f);
-            int full = 24 + 80;
             int h = 24 + (int) (80 * t);
             Gfx.round(ctx, x, y, w, h, 6, ROW);
             ctx.drawText(textRenderer, c.name, x + 10, y + 8, TEXT, false);
@@ -236,20 +288,31 @@ public class ClickGui extends Screen {
 
     // ------------------------------------------------------------------ input
     private void poll(int mx, int my) {
-        boolean left = GLFW.glfwGetMouseButton(client.getWindow().getHandle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
-        if (left && !prevLeft) press(mx, my);
+        long win = client.getWindow().getHandle();
+        boolean left = GLFW.glfwGetMouseButton(win, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
+        boolean right = GLFW.glfwGetMouseButton(win, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS;
+        if (left && !prevLeft) press(mx, my, 0);
         else if (left && drag != null) update(drag, mx, my);
         else if (!left) drag = null;
+        if (right && !prevRight) press(mx, my, 1);
         prevLeft = left;
+        prevRight = right;
     }
 
-    private void press(int mx, int my) {
+    private void press(int mx, int my, int button) {
         for (Hit h : hits) {
             if (!Gfx.in(mx, my, h.x, h.y, h.w, h.h)) continue;
-            boolean settingHit = h.kind != Kind.MODULE_SELECT && h.kind != Kind.MODULE_TOGGLE;
-            if (settingHit && (my < areaTop || my >= areaBot)) continue;
+            boolean unclipped = h.kind == Kind.CAT || h.kind == Kind.SAVE;
+            if (!unclipped && (my < areaTop || my >= areaBot)) continue;
+
+            if (button == 1) {                       // right click: expand / collapse module settings
+                if (h.kind == Kind.MODULE_TOGGLE || h.kind == Kind.MODULE_EXPAND) { toggleOpen((Module) h.ref); return; }
+                continue;
+            }
             switch (h.kind) {
-                case MODULE_SELECT -> { selected = (Module) h.ref; scroll = 0; }
+                case CAT -> { cat = (Module.Category) h.ref; scroll = 0; }
+                case SAVE -> Config.save(NovaClient.modules);
+                case MODULE_EXPAND -> toggleOpen((Module) h.ref);
                 case MODULE_TOGGLE -> ((Module) h.ref).toggle();
                 case BOOL -> ((BoolSetting) h.ref).toggle();
                 case MODE -> ((ModeSetting) h.ref).setIndex(h.idx);
@@ -259,6 +322,8 @@ public class ClickGui extends Screen {
             return;
         }
     }
+
+    private void toggleOpen(Module m) { if (!openModules.remove(m)) openModules.add(m); }
 
     private void update(Hit h, int mx, int my) {
         switch (h.kind) {

@@ -94,7 +94,7 @@ public abstract class EspModule extends Module {
         double r = range.get(), r2 = r * r;
         int cr = (int) Math.min(mc.options.getViewDistance().getValue(), Math.ceil(r / 16.0) + 1);
         int cx = mc.player.getChunkPos().x, cz = mc.player.getChunkPos().z;
-        Vec3d pp = mc.player.getPos();
+        Vec3d pp = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
 
         for (int dx = -cr; dx <= cr; dx++) {
             for (int dz = -cr; dz <= cr; dz++) {

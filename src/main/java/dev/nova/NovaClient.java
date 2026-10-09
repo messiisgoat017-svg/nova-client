@@ -8,7 +8,7 @@ import dev.nova.render.EspRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.MinecraftClient;
 import org.lwjgl.glfw.GLFW;
 
@@ -23,8 +23,16 @@ public class NovaClient implements ClientModInitializer {
         Config.load(modules);
 
         ClientTickEvents.END_CLIENT_TICK.register(this::tick);
-        // If this event name differs in your Fabric API build, try END_MAIN / BEFORE_DEBUG_RENDER.
-        WorldRenderEvents.AFTER_TRANSLUCENT.register(ctx -> EspRenderer.render(ctx.matrices(), modules));
+        ClientTickEvents.START_CLIENT_TICK.register(mc -> {
+            if (mc.world == null || mc.player == null) return;
+            for (Module m : modules.all()) if (m.isEnabled()) m.onPreTick(mc);
+        });
+        // 1.21.11: world render events live in the .world package; BEFORE_TRANSLUCENT is the supported hook.
+        WorldRenderEvents.BEFORE_TRANSLUCENT.register(ctx -> {
+            MinecraftClient mc = MinecraftClient.getInstance();
+            for (Module m : modules.all()) if (m.isEnabled()) m.onFrame(mc);
+            EspRenderer.render(ctx.matrices(), modules);
+        });
         ClientLifecycleEvents.CLIENT_STOPPING.register(c -> Config.save(modules));
     }
 

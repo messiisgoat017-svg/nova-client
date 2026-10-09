@@ -11,7 +11,7 @@ public class SpawnerFinder extends EspModule {
     public final ColorSetting trialColor   = add(new ColorSetting("Trial Spawner Color", 0x4DD0E1));
 
     public SpawnerFinder() {
-        super("Spawner Finder", "Highlights mob spawners (and optionally trial spawners).", 0xFF4D6D);
+        super("Spawner Finder", "Highlights mob spawners", 0xFF4D6D);
         // sensible defaults for this module
         fillOpacity.set(35.0);
         pulse.set(true);

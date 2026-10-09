@@ -28,7 +28,7 @@ public class StorageFinder extends EspModule {
     private final Map<String, ColorSetting> colors = new LinkedHashMap<>();
 
     public StorageFinder() {
-        super("Storage Finder", "Highlights chests, hoppers, droppers and other storage.", 0xFFB300);
+        super("Storage Finder", "Chests, hoppers, droppers & more", 0xFFB300);
         for (Entry e : ENTRIES) {
             BoolSetting t = add(new BoolSetting(e.label(), e.on()));
             ColorSetting c = add(new ColorSetting(e.label() + " Color", e.color()));

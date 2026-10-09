@@ -11,7 +11,21 @@ public abstract class Module {
     private boolean enabled;
     private final List<Setting<?>> settings = new ArrayList<>();
 
-    protected Module(String name, String description) { this.name = name; this.description = description; }
+    public enum Category {
+        COMBAT("Combat"), MOVEMENT("Movement"), RENDER("Render"), PLAYER("Player"), MISC("Misc"), HUD("HUD");
+        public final String label;
+        Category(String label) { this.label = label; }
+    }
+
+    private final Category category;
+
+    protected Module(String name, String description) { this(name, description, Category.RENDER); }
+
+    protected Module(String name, String description, Category category) {
+        this.name = name; this.description = description; this.category = category;
+    }
+
+    public Category category() { return category; }
 
     protected <S extends Setting<?>> S add(S s) { settings.add(s); return s; }
 
@@ -30,4 +44,8 @@ public abstract class Module {
     protected void onEnable() {}
     protected void onDisable() {}
     public void onTick(MinecraftClient mc) {}
+    /** Runs at the START of every client tick (before the game reads input). */
+    public void onPreTick(MinecraftClient mc) {}
+    /** Runs once per rendered frame. */
+    public void onFrame(MinecraftClient mc) {}
 }
