@@ -1,5 +1,6 @@
 package dev.nova.module;
 
+import com.mojang.authlib.GameProfile;
 import dev.nova.setting.BoolSetting;
 import dev.nova.setting.NumberSetting;
 import net.minecraft.client.MinecraftClient;
@@ -7,6 +8,8 @@ import net.minecraft.client.input.Input;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.world.ClientWorld;
+import org.lwjgl.glfw.GLFW;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 
@@ -25,12 +28,26 @@ public class Freecam extends Module {
     public final NumberSetting boost = add(new NumberSetting("Sprint Boost", 2.0, 1.0, 5.0, 0.5, "x"));
     public final BoolSetting disableOnDamage = add(new BoolSetting("Disable On Damage", true));
 
-    private OtherClientPlayerEntity cam;
+    private CamEntity cam;
     private ClientPlayerEntity tracked;
     private Input savedInput;
     private Vec3d pos = Vec3d.ZERO;
     private float camYaw, camPitch, savedYaw, savedPitch;
     private long lastNs;
+    private double lastCx, lastCy;
+    private boolean prevGrabbed;
+
+    /**
+     * Dummy camera entity. It ignores anything the game tries to do to its rotation (mouse look) and
+     * reports its exact yaw/pitch/position (no tick interpolation), which removes camera jitter.
+     */
+    private static final class CamEntity extends OtherClientPlayerEntity {
+        CamEntity(ClientWorld world, GameProfile profile) { super(world, profile); }
+        public void changeLookDirection(double dx, double dy) { /* ignored */ }
+        public float getYaw(float tickDelta) { return getYaw(); }
+        public float getPitch(float tickDelta) { return getPitch(); }
+        public Vec3d getLerpedPos(float tickDelta) { return new Vec3d(getX(), getY(), getZ()); }
+    }
 
     public Freecam() {
         super("Freecam", "Detach the camera and fly around", Category.RENDER);
@@ -46,13 +63,14 @@ public class Freecam extends Module {
         savedPitch = camPitch = mc.player.getPitch();
         pos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
 
-        cam = new OtherClientPlayerEntity(mc.world, mc.player.getGameProfile());
+        cam = new CamEntity(mc.world, mc.player.getGameProfile());
         cam.refreshPositionAndAngles(pos.x, pos.y, pos.z, camYaw, camPitch);
 
         savedInput = mc.player.input;
         mc.player.input = new Input() {};      // empty input -> real player does not move
         mc.setCameraEntity(cam);
         lastNs = System.nanoTime();
+        prevGrabbed = false;
     }
 
     @Override
@@ -96,9 +114,22 @@ public class Freecam extends Module {
         float dt = Math.min(0.1f, (now - lastNs) / 1e9f);
         lastNs = now;
 
-        // mouse look: the game rotated the real player; move that delta to the camera, then undo it
-        camYaw += mc.player.getYaw() - savedYaw;
-        camPitch = MathHelper.clamp(camPitch + (mc.player.getPitch() - savedPitch), -90f, 90f);
+        // mouse look: read the raw cursor movement ourselves (same maths as vanilla), so it works no matter
+        // which entity the game applies its own mouse rotation to
+        double[] cx = new double[1], cy = new double[1];
+        GLFW.glfwGetCursorPos(mc.getWindow().getHandle(), cx, cy);
+        boolean grabbed = mc.currentScreen == null && mc.mouse.isCursorLocked();
+        if (grabbed && prevGrabbed) {
+            double d = mc.options.getMouseSensitivity().getValue() * 0.6 + 0.2;
+            double f = d * d * d * 8.0 * 0.15;
+            camYaw += (float) ((cx[0] - lastCx) * f);
+            camPitch = MathHelper.clamp(camPitch + (float) ((cy[0] - lastCy) * f), -90f, 90f);
+        }
+        lastCx = cx[0];
+        lastCy = cy[0];
+        prevGrabbed = grabbed;
+
+        // undo whatever the game did to the real player's rotation so nothing is sent to the server
         mc.player.setYaw(savedYaw);
         mc.player.setPitch(savedPitch);
 
