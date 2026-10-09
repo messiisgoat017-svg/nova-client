@@ -46,7 +46,6 @@ public class Freecam extends Module {
         public void changeLookDirection(double dx, double dy) { /* ignored */ }
         public float getYaw(float tickDelta) { return getYaw(); }
         public float getPitch(float tickDelta) { return getPitch(); }
-        public Vec3d getLerpedPos(float tickDelta) { return new Vec3d(getX(), getY(), getZ()); }
     }
 
     public Freecam() {
